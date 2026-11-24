@@ -168,6 +168,46 @@ describe('ConversationStorage', () => {
       };
       expect(count.count).toBe(1);
     });
+
+    it('should store only small scalar metadata fields, not the raw transcript entry', async () => {
+      const metadata = {
+        type: 'user',
+        uuid: 'abc-123',
+        isMeta: false,
+        version: 2,
+        message: { role: 'user', content: [{ type: 'tool_result', content: 'x'.repeat(5000) }] },
+        toolUseResult: { stdout: 'y'.repeat(5000) },
+        rendered: 'z'.repeat(5000),
+      };
+      const messages: Message[] = [
+        {
+          id: 'msg-big',
+          conversation_id: 'test-conv-1',
+          message_type: 'user',
+          role: 'user',
+          content: 'Big message',
+          timestamp: Date.now(),
+          is_sidechain: false,
+          metadata,
+        },
+      ];
+
+      await storage.storeMessages(messages, { conversationIdMap });
+
+      const row = db
+        .getDatabase()
+        .prepare("SELECT metadata FROM messages WHERE external_id = 'msg-big'")
+        .get() as { metadata: string };
+      expect(JSON.parse(row.metadata)).toEqual({
+        type: 'user',
+        uuid: 'abc-123',
+        isMeta: false,
+        version: 2,
+      });
+      // The in-memory message passed to extractors must stay untouched
+      expect(messages[0].metadata).toBe(metadata);
+      expect(metadata.toolUseResult.stdout).toHaveLength(5000);
+    });
   });
 
   describe('getDecisionsForFile', () => {

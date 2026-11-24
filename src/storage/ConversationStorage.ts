@@ -39,6 +39,30 @@ import { QueryCache, type QueryCacheConfig, type CacheStats } from "../cache/Que
 import { safeJsonParse } from "../utils/safeJson.js";
 import { getCanonicalProjectPath } from "../utils/worktree.js";
 
+const MAX_STORED_METADATA_STRING = 1024;
+
+/**
+ * Reduce a message's metadata to small top-level scalar fields before storing it.
+ *
+ * Parsers attach the whole raw transcript entry as metadata. Its nested objects
+ * (message body, tool results, attachments) duplicate other columns and tables and
+ * were most of the database size. Extractors read the full in-memory object, so
+ * only the stored copy is reduced.
+ */
+function compactMessageMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> {
+  const compact: Record<string, unknown> = {};
+  for (const [key, value] of Object.entries(metadata ?? {})) {
+    if (
+      typeof value === "number" ||
+      typeof value === "boolean" ||
+      (typeof value === "string" && value.length <= MAX_STORED_METADATA_STRING)
+    ) {
+      compact[key] = value;
+    }
+  }
+  return compact;
+}
+
 /**
  * Data access layer for conversation memory storage.
  *
@@ -397,7 +421,7 @@ export class ConversationStorage {
           msg.request_id || null,
           msg.git_branch || null,
           msg.cwd || null,
-          JSON.stringify(msg.metadata)
+          JSON.stringify(compactMessageMetadata(msg.metadata))
         );
 
         const row = selectStmt.get(convId, msg.id) as { id: number };
